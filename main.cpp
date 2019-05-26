@@ -149,6 +149,53 @@ int main()
             &createKernelResult
     );
 
+    auto hostBuffer = std::vector<unsigned int>(lcsSize);
+    cl_int createBufferResult;
+    const auto bufferSize = lcsSize * sizeof(unsigned int);
+    auto buffer = clCreateBuffer(
+            context,
+            CL_MEM_READ_WRITE,
+            bufferSize,
+            nullptr,
+            &createBufferResult
+    );
+
+    clSetKernelArg(
+            kernel,
+            0,
+            sizeof(cl_mem),
+            &buffer
+    );
+
+    size_t globalWorkSize[] = { numberOfWorkItems, 0, 0 };
+    clEnqueueNDRangeKernel(
+            commandQueue,
+            kernel,
+            1,
+            nullptr,
+            globalWorkSize,
+            nullptr,
+            0,
+            nullptr,
+            nullptr
+    );
+
+    clEnqueueReadBuffer(
+            commandQueue,
+            buffer,
+            CL_TRUE,
+            0,
+            bufferSize,
+            hostBuffer.data(),
+            0,
+            nullptr,
+            nullptr
+    );
+
+    for (auto& element : hostBuffer) {
+        std::cout << element << "\n";
+    }
+
     //In general Intel CPU and NV/AMD's GPU are in different platforms
     //But in Mac OSX, all the OpenCL devices are in the platform "Apple"
 //    cl_platform_id platform_id = NULL;
