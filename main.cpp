@@ -1,5 +1,7 @@
 #include <iostream>
+#include <fstream>
 #include <string>
+#include <streambuf>
 #include <CL/cl.hpp>
 
 int main()
@@ -75,6 +77,77 @@ int main()
     );
     std::cout << std::string(deviceName) << "\n";
 
+    cl_int createContextResult;
+    cl_context context = clCreateContext(
+            nullptr,
+            DESIRED_NUMBER_OF_DEVICES,
+            &deviceId,
+            nullptr,
+            nullptr,
+            &createContextResult
+    );
+
+    cl_int createQueueResult;
+    cl_command_queue commandQueue = clCreateCommandQueueWithProperties(
+            context,
+            deviceId,
+            nullptr,
+            &createQueueResult
+    );
+
+    const auto kernelsFileNames = {
+            std::string("kernel.cl")
+    };
+    auto kernelsSources = std::vector<std::string>();
+
+    std::string kernelSourceLine;
+    for (const auto& kernelFileName : kernelsFileNames) {
+        std::ifstream kernelFile(kernelFileName);
+        if (kernelFile.is_open()) {
+            const auto kernelSource = std::string(
+                    std::istreambuf_iterator<char>(kernelFile),
+                    std::istreambuf_iterator<char>()
+            );
+            kernelsSources.push_back(kernelSource);
+        }
+    }
+
+    const auto numberOfKernels = (cl_uint)kernelsSources.size();
+    auto kernelStrings = std::vector<const char*>();
+    auto kernelLengths = std::vector<size_t>();
+    for (const auto& kernel : kernelsSources) {
+        kernelStrings.push_back(kernel.data());
+        kernelLengths.push_back(kernel.length());
+    }
+    cl_int createProgramResult;
+    const auto program = clCreateProgramWithSource(
+            context,
+            numberOfKernels,
+            kernelStrings.data(),
+            kernelLengths.data(),
+            &createProgramResult
+    );
+
+    const auto buildProgramResult = clBuildProgram(
+            program,
+            DESIRED_NUMBER_OF_DEVICES,
+            &deviceId,
+            nullptr,
+            nullptr,
+            nullptr
+    );
+    if (buildProgramResult == CL_SUCCESS) {
+        std::cout << "Successfully compiled all kernels\n";
+    } else {
+        exit(1);
+    }
+
+    cl_int createKernelResult;
+    const auto kernel = clCreateKernel(
+            program,
+            "vecAdd",
+            &createKernelResult
+    );
 
     //In general Intel CPU and NV/AMD's GPU are in different platforms
     //But in Mac OSX, all the OpenCL devices are in the platform "Apple"
