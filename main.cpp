@@ -25,7 +25,7 @@ int main()
     size_t lcsWidth = x.length() + 1;
     size_t lcsHeight = y.length() + 1;
     size_t lcsSize = lcsWidth * lcsHeight;
-    size_t numberOfWorkItems = std::min(lcsWidth, lcsHeight);
+    size_t numberOfWorkItems = std::max(lcsWidth, lcsHeight);
 
     cl_uint DESIRED_NUMBER_OF_PLATFORMS = 1;
     cl_platform_id platformId;
@@ -139,6 +139,12 @@ int main()
     if (buildProgramResult == CL_SUCCESS) {
         std::cout << "Successfully compiled all kernels\n";
     } else {
+        std::string log;
+        log.resize(1024);
+        size_t resultSize;
+        clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, 1024, (void*)log.data(), &resultSize);
+        log.resize(resultSize);
+        std::cout << log << "\n";
         exit(1);
     }
 
@@ -159,6 +165,20 @@ int main()
             nullptr,
             &createBufferResult
     );
+    auto xBuffer = clCreateBuffer(
+            context,
+            CL_MEM_COPY_HOST_PTR,
+            x.length() * sizeof(char),
+            (void*)x.data(),
+            &createBufferResult
+    );
+    auto yBuffer = clCreateBuffer(
+            context,
+            CL_MEM_COPY_HOST_PTR,
+            y.length() * sizeof(char),
+            (void*)y.data(),
+            &createBufferResult
+    );
 
     clSetKernelArg(
             kernel,
@@ -166,6 +186,10 @@ int main()
             sizeof(cl_mem),
             &buffer
     );
+    clSetKernelArg(kernel, 1, sizeof(cl_mem), &xBuffer);
+    clSetKernelArg(kernel, 2, sizeof(lcsWidth), &lcsWidth);
+    clSetKernelArg(kernel, 3, sizeof(cl_mem), &yBuffer);
+    clSetKernelArg(kernel, 4, sizeof(lcsHeight), &lcsHeight);
 
     size_t globalWorkSize[] = { numberOfWorkItems, 0, 0 };
     clEnqueueNDRangeKernel(
@@ -192,8 +216,11 @@ int main()
             nullptr
     );
 
-    for (auto& element : hostBuffer) {
-        std::cout << element << "\n";
+    for (unsigned int j = 0; j < lcsHeight; j++) {
+        for (unsigned int i = 0; i < lcsWidth; i++) {
+            std::cout << hostBuffer[j * lcsWidth + i] << "\t";
+        }
+        std::cout << "\n";
     }
 
     //In general Intel CPU and NV/AMD's GPU are in different platforms
