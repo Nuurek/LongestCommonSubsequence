@@ -2,30 +2,32 @@
 #include <fstream>
 #include <string>
 #include <streambuf>
+#include <set>
+#include <algorithm>
 #include <CL/cl.hpp>
 
 int main()
 {
     std::string mode, x, y;
     std::cout << "Do you want to use test data? y/n\n";
-    std::cin >> mode;
+    std::getline(std::cin, mode);
     if (mode == "y") {
         x = "1232412";
         y = "243121";
     } else {
         std::cout << "First sequence: ";
-        std::cin >> x;
+        std::getline(std::cin, x);
         std::cout << "Second sequence: ";
-        std::cin >> y;
+        std::getline(std::cin, y);
     }
 
     std::cout << "Searching for a Longest Common Subsequence (LCS) between ";
     std::cout << x << " and " << y << "\n";
 
-    size_t lcsWidth = x.length() + 1;
-    size_t lcsHeight = y.length() + 1;
-    size_t lcsSize = lcsWidth * lcsHeight;
-    size_t numberOfWorkItems = std::max(lcsWidth, lcsHeight);
+    unsigned long lcsWidth = x.length() + 1;
+    unsigned long lcsHeight = y.length() + 1;
+    unsigned long lcsSize = lcsWidth * lcsHeight;
+    unsigned long numberOfWorkItems = std::max(lcsWidth, lcsHeight);
 
     cl_uint DESIRED_NUMBER_OF_PLATFORMS = 1;
     cl_platform_id platformId;
@@ -96,8 +98,7 @@ int main()
     );
 
     const auto kernelsFileNames = {
-            std::string("calculateLCS.cl"),
-            std::string("traverseLCS.cl")
+            std::string("calculateLCS.cl")
     };
     auto kernelsSources = std::vector<std::string>();
 
@@ -157,7 +158,7 @@ int main()
     );
 
     cl_int createBufferResult;
-    const auto bufferSize = lcsSize * sizeof(unsigned int);
+    const auto bufferSize = lcsSize * sizeof(unsigned long);
     auto lcsBuffer = clCreateBuffer(
             context,
             CL_MEM_READ_WRITE,
@@ -199,7 +200,7 @@ int main()
             nullptr
     );
 
-    auto hostLCSBuffer = std::vector<unsigned int>(lcsSize);
+    auto hostLCSBuffer = std::vector<unsigned long>(lcsSize);
     clEnqueueReadBuffer(
             commandQueue,
             lcsBuffer,
@@ -212,77 +213,87 @@ int main()
             nullptr
     );
 
-    for (unsigned int j = 0; j < lcsHeight; j++) {
-        for (unsigned int i = 0; i < lcsWidth; i++) {
-            std::cout << hostLCSBuffer[j * lcsWidth + i] << "\t";
+    std::vector<std::vector<unsigned long>> lcs;
+    for (unsigned long i = 0; i < lcsWidth; i++) {
+        lcs.emplace_back(std::vector<unsigned long>(lcsHeight));
+
+        for (unsigned long j = 0; j < lcsHeight; j++) {
+            lcs[i][j] = hostLCSBuffer[j * lcsWidth + i];
+            std::cout << lcs[i][j] << "\t";
         }
         std::cout << "\n";
     }
+    std::cout << "\n";
 
-    const auto traverseLCSKernel = clCreateKernel(
-            program,
-            "traverseLCS",
-            &createKernelResult
-    );
+    std::vector<std::vector<std::set<std::string>>> results;
+    for (unsigned long i = 0; i < lcsWidth; i++) {
+        results.emplace_back(std::vector<std::set<std::string>>(lcsHeight));
+    }
 
-    const unsigned int resultStringLength = hostLCSBuffer[lcsSize - 1];
-    const size_t resultCStringSize = sizeof(char) * (resultStringLength + 1);
-    const size_t resultCellSize = sizeof(unsigned int) + resultStringLength * resultStringLength * resultCStringSize;
-    const size_t resultsSize = lcsSize * resultCellSize;
-    auto resultsBuffer = clCreateBuffer(
-            context,
-            CL_MEM_READ_WRITE,
-            resultsSize,
-            nullptr,
-            &createBufferResult
-    );
+    const size_t numberOfIterations = lcsWidth + lcsHeight;
 
-    clSetKernelArg(traverseLCSKernel, 0, sizeof(cl_mem), &lcsBuffer);
-    clSetKernelArg(traverseLCSKernel, 1, sizeof(cl_mem), &xBuffer);
-    clSetKernelArg(traverseLCSKernel, 2, sizeof(lcsWidth), &lcsWidth);
-    clSetKernelArg(traverseLCSKernel, 3, sizeof(cl_mem), &yBuffer);
-    clSetKernelArg(traverseLCSKernel, 4, sizeof(lcsHeight), &lcsHeight);
-    clSetKernelArg(traverseLCSKernel, 5, sizeof(cl_mem), &resultsBuffer);
+    for (unsigned long n = 0; n < numberOfIterations; n++) {
+        const unsigned long start = n < lcsHeight ? 0 : n - lcsHeight + 1;
+        const unsigned long end = n < lcsWidth ? n : (lcsWidth - 1);
+        for (unsigned long i = start; i <= end; i++) {
+            const unsigned long j = n - i;
 
-    clEnqueueNDRangeKernel(
-            commandQueue,
-            traverseLCSKernel,
-            1,
-            nullptr,
-            globalWorkSize,
-            nullptr,
-            0,
-            nullptr,
-            nullptr
-    );
+            std::set<std::string> result;
+            if (i == 0 || j == 0) {
+                result = std::set<std::string>();
+                result.insert(std::string());
+            } else if (x[i - 1] != y[j - 1]) {
+                auto set1 = std::set<std::string>();
+                auto set2 = std::set<std::string>();
 
-    auto hostResultsBuffer = std::vector<char>(resultsSize);
-    clEnqueueReadBuffer(
-            commandQueue,
-            resultsBuffer,
-            CL_TRUE,
-            0,
-            resultsSize,
-            hostResultsBuffer.data(),
-            0,
-            nullptr,
-            nullptr
-    );
+                if (lcs[i - 1][j] >= lcs[i][j - 1]) {
+                    set1 = results[i - 1][j];
+                }
 
-    for (unsigned int j = 0; j < lcsHeight; j++) {
-        for (unsigned int i = 0; i < lcsWidth; i++) {
-            const unsigned int numberOfStrings = hostResultsBuffer[(j * lcsWidth + i) * resultCellSize];
-            std::cout << "[" << i << "][" << j << "] " << numberOfStrings << "\n";
+                if (lcs[i - 1][j] <= lcs[i][j - 1]) {
+                    set2 = results[i][j - 1];
+                }
+
+                set1.insert(set2.begin(), set2.end());
+                result = set1;
+            } else {
+                result = std::set<std::string>();
+
+                const auto& previousResult = results[i - 1][j - 1];
+                const auto character = x[i - 1];
+                for (const auto& sequence : previousResult) {
+                    auto extendedSequence = sequence;
+                    extendedSequence += character;
+                    result.insert(extendedSequence);
+                }
+            }
+
+            results[i][j] = result;
+
+            std::cout << "[" << i << "][" << j << "] ";
+            for (const auto& sequence : result) {
+                std::cout << "[" << (!sequence.empty() ? sequence : "EMPTY SEQUENCE") << "], ";
+            }
+            std::cout << "\n";
         }
+    }
+    std::cout << "\n";
+
+    const auto& finalResult = results[lcsWidth - 1][lcsHeight - 1];
+    if (!finalResult.empty()) {
+        std::cout << "Found " << finalResult.size() << " longest common subsequences:\n";
+        for (const auto& sequence : finalResult) {
+            std::cout << "[" << (!sequence.empty() ? sequence : "EMPTY SEQUENCE") << "]\n";
+        }
+    } else {
+        std::cout << "Nothing found\n";
     }
 
     clFlush(commandQueue);
     clFinish(commandQueue);
     clReleaseKernel(calculateLCSKernel);
-    clReleaseKernel(traverseLCSKernel);
     clReleaseProgram(program);
     clReleaseMemObject(lcsBuffer);
-    clReleaseMemObject(resultsBuffer);
     clReleaseCommandQueue(commandQueue);
     clReleaseContext(context);
 
