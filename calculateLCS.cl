@@ -1,4 +1,4 @@
-__kernel void vecAdd(
+__kernel void calculateLCS(
     __global unsigned int* lcs,
     __constant char* x,
     unsigned int lcsWidth,
